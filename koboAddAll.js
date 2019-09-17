@@ -14,129 +14,87 @@ function getKoboApiUrl(apiPath) {
   return '/' + [splits[1], splits[2], apiPath.replace(/^\//, '')].join('/');
 }
 
-function addToCart(pid, apiUrl = '/zh/tw/shoppingcartwidget/add') {
-  const p = new Promise((resolve, reject) => {
-    $.post(
-      apiUrl,
-      {
-        Id: pid,
-        IsKoboLoveMembership: false,
+function addToCart(pid, apiUrl = '/tw/zh/shoppingcartwidget/add') {
+  const req = 'https://www.kobo.com' + apiUrl;
+  const bodyJson = JSON.stringify({ Id: pid, IsKoboLoveMembership: false, });
+  const p = fetch(
+    req,
+    {
+      method: 'POST',
+      credentials: 'same-origin',
+      mode: 'same-origin',
+      body: bodyJson,
+      headers: {
+        'Content-Type': 'application/json; charset=utf-8',
+        'X-Requested-With': 'XMLHttpRequest',
       },
-      null,
-      'json',
-    )
-      .done((resp) => {
-        console.log(resp);
-
-        // update UI
-        appendMessage(
-          `${resp.ItemDetails.Title} - ${
-            resp.IsSuccess ? '已成功加入購物車' : resp.ErrorMessage
-          }`,
-        );
-        resolve(resp);
-      })
-      .fail((jqXHR, textStatus, errorThrown) => {
-        resolve({
-          IsSuccess: false,
-          ErrorMessage: textStatus,
-          jqXHR: jqXHR,
-          textStatus: textStatus,
-          errorThrown: errorThrown,
-        });
-      });
-  });
-
+    }).then((response) => {
+      return response.json();
+    }).then((resp) => {
+      appendMessage(resp.ItemDetails.Title + '-added to cart');
+      return resp;
+    });
   return p;
 }
 
 function appendMessage(msg) {
-  const elm = $('#kobo-aa-dimmer .main .inner');
-  if (elm.length > 0) {
-    elm.append(`<div class="kobo-aa result-items">${msg}</div>`);
-  }
+  const elm = document.querySelector('#kobo-aa-dimmer .main .inner');
+  const msgDiv = document.createElement('div');
+  msgDiv.classList.add('kobo-aa', 'result-items')
+  msgDiv.textContent = msg;
+  elm.appendChild(msgDiv);  
 }
 
-function koboAddAll(jq = $) {
-  const p = new Promise((resolve, reject) => {
-    const apiUrl = getKoboApiUrl('/shoppingcartwidget/add');
-    const reqList = [];
-
-    $.each(jq.find('li.item-wrapper.book'), (idx, x) => {
-      const pid = $(x).data('track-info').productId;
-      reqList.push(addToCart(pid, apiUrl));
-    });
-
-    Promise.all(reqList).then((results) => {
-      resolve(results);
-    });
-  });
-
-  return p;
-}
-
-function koboFindNextPage(jq = $) {
-  if (jq.find('div.pagination').length == 0) {
-    return '';
-  }
-
-  if (jq.find('div.pagination .next.disabled').length > 0) {
-    return '';
-  }
-
-  return jq
-    .find('div.pagination a.page-link.active')
-    .next()
-    .attr('href');
+function insertAfter(newNode, referenceNode) {
+  referenceNode.parentNode.insertBefore(newNode, referenceNode.nextSibling);
 }
 
 function addSequenceShortCuts() {
-  $.each($('span.product-sequence-field'), (idx, x) => {
-    $(x).after(
-      `<div class="kobo-aa add-btn" data-href="${$(x)
-        .children('a')
-        .attr('href')}">將全系列加入購物車</div>`,
-    );
-  });
-
-  $.each($('li.wishlist-item span.series'), (idx, x) => {
-    $(x).after(
-      `<div class="kobo-aa add-btn" data-href="${$(x)
-        .children('a')
-        .attr('href')}">將全系列加入購物車</div>`,
-    );
+  const items = document.querySelectorAll('span.product-sequence-field, li.wishlist-item span.series');
+  
+  [].forEach.call(items, item => {
+    var aaDiv = document.createElement('div');
+    aaDiv.classList.add('kobo-aa', 'add-btn');
+    aaDiv.setAttribute('data-href', item.querySelector('a').href);
+    aaDiv.textContent = 'Add this series';
+    aaDiv.addEventListener('click', (e) => {
+      const initUrl = e.target.dataset.href + '&sort=TitleAsc';
+      addDimmer();
+      processSeqPage(initUrl, () => {
+        appendMessage('Done. Please refresh the page');
+      });
+    });
+    insertAfter(aaDiv, item);
   });
 }
 
 function addDimmer() {
-  if ($('#kobo-aa-dimmer').length > 0) {
-    return;
+  if (!document.querySelector('#kobo-aa-dimmer')) {
+    const dimmer = document.createElement('div');
+    dimmer.id = 'kobo-aa-dimmer';
+    dimmer.classList.add('kobo-aa-dimmer');
+
+    const dimmerMain = document.createElement('div');
+    dimmerMain.classList.add('main');
+
+    const dimmerInner = document.createElement('div');
+    dimmerInner.classList.add('inner');
+
+    dimmerMain.appendChild(dimmerInner);
+    dimmer.appendChild(dimmerMain);
+
+    document.body.append(dimmer);
   }
-
-  let dimmerElm = $(`
-<div id="kobo-aa-dimmer">
-    <div class="main">
-        <div class="inner"></div>
-    </div>
-</div>`);
-  $('body')
-    .append(dimmerElm)
-    .addClass('kobo-aa-dimmer');
 }
 
-function dismissDimmer() {
-  $('#kobo-aa-dimmer').remove();
-  $('body').removeClass('kobo-aa-dimmer');
-}
-
-function koboAddAllAjax(jq) {
+function koboAddAllAjax(items) {
   const p = new Promise((resolve, reject) => {
     const apiUrl = getKoboApiUrl('/shoppingcartwidget/add');
     const results = [];
 
     let chain = Promise.resolve();
-    $.each(jq.filter('li'), (idx, x) => {
-      const pid = $(x).data('track-info').productId;
+    [].forEach.call(items, item => {
+      const pid = JSON.parse(item.dataset.trackInfo).productId;
       chain = chain.then(() => {
         return addToCart(pid, apiUrl).then((resp) => {
           results.push(resp);
@@ -153,41 +111,37 @@ function koboAddAllAjax(jq) {
 }
 
 function processSeqPage(url, finalCB) {
-  $.get(url)
-    .done((resp) => {
-      const jq = $(resp.Items);
-      koboAddAllAjax(jq).then((results) => {
-        console.log('koboAddAllAjax.done');
-        console.log(results);
-        if (resp.HasMoreResults) {
-          if (/&pageNumber=(\d+)/.test(url)) {
-            const page = parseInt(/&pageNumber=(\d+)/.exec(url)[1], 10);
-            url = url.replace(/&pageNumber=(\d+)/, `&pageNumber=${page + 1}`);
-          } else {
-            url += '&pageNumber=2';
+  fetch(url, {method: 'GET'})
+  .then(response => {
+    return response.text();
+  })
+  .then(seriesHtml => {
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(seriesHtml, "text/html");
+    const items = doc.querySelectorAll('ul.result-items li');
+
+    koboAddAllAjax(items).then((results) => {
+      console.log('koboAddAllAjax.done');
+      console.log(results);
+      if (!!doc.querySelector('div.pagination')) { 
+        if (/&pageNumber=(\d+)/.test(url)) {
+          const currentPage = parseInt(/&pageNumber=(\d+)/.exec(url)[1], 10);
+          const finalPage = parseInt(doc.querySelector('div.pagination a.final').textContent);
+          if (currentPage == finalPage) {
+            finalCB();
+            return ;
           }
-          appendMessage('正在載入後續書籍資料 ... 請稍候');
-          processSeqPage(url, finalCB);
+          url = url.replace(/&pageNumber=(\d+)/, `&pageNumber=${currentPage + 1}`);
         } else {
-          finalCB();
+          url += '&pageNumber=2';
         }
-      });
-    })
-    .fail((jqXHR, textStatus, errorThrown) => {
-      alert(textStatus);
-      finalCB(false);
+        appendMessage('Loading series ... please wait');
+        processSeqPage(url, finalCB);
+      } else {
+        finalCB();
+      }
     });
+  });
 }
 
 addSequenceShortCuts();
-
-// bind event
-$('div.kobo-aa.add-btn').on('click', (e) => {
-  const initUrl = e.target.dataset.href + '&sort=TitleAsc';
-  addDimmer();
-  processSeqPage(initUrl, () => {
-    appendMessage('完成，請重新整理網頁');
-    // alert('完成');
-    // dismissDimmer();
-  });
-});
